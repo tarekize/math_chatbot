@@ -1,97 +1,106 @@
 import os
 import google.generativeai as genai
-from flask import Flask, request, jsonify, render_template
-from dotenv import load_dotenv
+from flask import Flask, request, jsonify
+from flask_cors import CORS
 import json
+from dotenv import load_dotenv
 
-# Charger les variables d'environnement
 load_dotenv()
 
 app = Flask(__name__)
+CORS(app)
 
 # Configuration de Gemini
-API_KEY = os.getenv('GEMINI_API_KEY', 'AIzaSyA_tsW-sJXNszOCMwgwcjAqiLEnkv_v4mE')
+GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
+if not GEMINI_API_KEY:
+    GEMINI_API_KEY = "AIzaSyA_tsW-sJXNszOCMwgwcjAqiLEnkv_v4mE"
 
-if not API_KEY or API_KEY == 'your_gemini_api_key_here':
-    raise ValueError("Clé API Gemini manquante. Configurez la variable GEMINI_API_KEY")
+genai.configure(api_key=GEMINI_API_KEY)
 
-genai.configure(api_key=API_KEY)
-
-# Charger le dataset d'entraînement
+# Chargement du dataset
 def load_training_data():
     try:
         with open('Mathematical_Question_Response_Dataset.json', 'r', encoding='utf-8') as f:
             return json.load(f)
     except FileNotFoundError:
-        print("Fichier dataset non trouvé, utilisation des exemples de base")
-        return [
-            {
-                "cours": "Équations du premier degré",
-                "question": "Résoudre l'équation : x + 5 = 10",
-                "reponse": "x = 5",
-                "explication": "Pour isoler x, soustrayez 5 des deux côtés de l'équation."
-            }
-        ]
+        return []
 
-# Préparer le prompt avec la méthode du professeur
+# Prompt système basé sur la méthode du professeur
 def create_system_prompt():
     dataset = load_training_data()
+    
     prompt = """
-Tu es un assistant mathématique spécialisé qui doit STRICTEMENT suivre la méthode d'enseignement du professeur.
+Tu es un assistant mathématique spécialisé qui répond UNIQUEMENT aux questions de mathématiques.
+Tu dois suivre rigoureusement la méthode d'enseignement suivante :
 
-RÈGLES IMPORTANTES :
-1. Résoudre UNIQUEMENT les questions mathématiques
-2. Suivre exactement la méthode détaillée dans le dataset
+MÉTHODE À SUIVRE :
+1. Identifier le type d'équation ou de problème
+2. Appliquer les étapes de résolution de manière structurée
 3. Fournir des explications claires et pédagogiques
-4. Structurer les réponses comme dans les exemples
+4. Donner la réponse finale de manière précise
 
-EXEMPLES DE MÉTHODES À SUIVRE :
+EXEMPLES DE RÉPONSES ATTENDUES :
 """
     
-    for item in dataset[:10]:  # Utiliser les 10 premiers exemples
+    # Ajout d'exemples du dataset
+    for example in dataset[:5]:  # Utiliser les 5 premiers exemples
         prompt += f"""
-Question : {item['question']}
-Réponse : {item['reponse']}
-Explication : {item['explication']}
+Question : {example['question']}
+Réponse : {example['reponse']}
+Explication : {example['explication']}
 ---
 """
     
     prompt += """
-MAINTENANT, pour toute question mathématique, appliquez ces méthodes exactement.
-Si ce n'est pas une question mathématique, répondez : "Je suis spécialisé uniquement dans les questions mathématiques."
+INSTRUCTIONS IMPORTANTES :
+- Réponds UNIQUEMENT aux questions mathématiques
+- Suis exactement le format des exemples ci-dessus
+- Sois précis et méthodique dans tes explications
+- Si la question n'est pas mathématique, réponds poliment que tu ne peux répondre
+- Utilise un langage clair et pédagogique
+
+MAINTENANT, RÉPONDS À LA QUESTION SUIVANTE :
 """
+    
     return prompt
-
-# Initialiser le modèle
-try:
-    model = genai.GenerativeModel('gemini-pro')
-    system_prompt = create_system_prompt()
-except Exception as e:
-    print(f"Erreur initialisation Gemini: {e}")
-    model = None
-    system_prompt = ""
-
-@app.route('/')
-def home():
-    return render_template('index.html')
 
 @app.route('/chat', methods=['POST'])
 def chat():
     try:
-        if model is None:
-            return jsonify({'error': 'Modèle non initialisé'}), 500
-            
-        data = request.json
+        data = request.get_json()
         user_message = data.get('message', '').strip()
         
         if not user_message:
             return jsonify({'error': 'Message vide'}), 400
         
-        # Préparer le message avec le contexte système
-        full_prompt = f"{system_prompt}\n\nQuestion : {user_message}\nRéponse :"
+        # Vérifier si c'est une question mathématique
+        math_keywords = ['résoudre', 'calculer', 'équation', 'mathématique', 'algèbre', 
+                        'géométrie', 'calcul', 'fraction', 'pourcentage', 'aire', 
+                        'volume', 'angle', 'théorème', 'fonction', 'dérivée', 'intégrale']
         
-        # Appeler Gemini
-        response = model.generate_content(full_prompt)
+        is_math_question = any(keyword in user_message.lower() for keyword in math_keywords)
+        
+        if not is_math_question:
+            return jsonify({
+                'response': 'Je suis spécialisé uniquement dans les questions mathématiques. Pouvez-vous me poser une question de mathématiques ?'
+            })
+        
+        # Configuration du modèle
+        generation_config = {
+            "temperature": 0.3,
+            "top_p": 0.8,
+            "top_k": 40,
+            "max_output_tokens": 1024,
+        }
+        
+        model = genai.GenerativeModel(
+            model_name="gemini-pro",
+            generation_config=generation_config,
+            system_instruction=create_system_prompt()
+        )
+        
+        # Génération de la réponse
+        response = model.generate_content(user_message)
         
         return jsonify({
             'response': response.text,
@@ -101,9 +110,9 @@ def chat():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/health')
-def health():
-    return jsonify({'status': 'healthy', 'model_loaded': model is not None})
+@app.route('/health', methods=['GET'])
+def health_check():
+    return jsonify({'status': 'healthy', 'service': 'Math Chatbot'})
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
