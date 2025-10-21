@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="fr">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chatbot Mathématiques</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .chat-container {
+            border: 1px solid #ccc;
+            border-radius: 10px;
+            padding: 20px;
+            height: 500px;
+            overflow-y: auto;
+        }
+
+        .message {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 5px;
+        }
+
+        .user {
+            background: #e3f2fd;
+            text-align: right;
+        }
+
+        .bot {
+            background: #f5f5f5;
+            text-align: left;
+        }
+
+        .input-container {
+            display: flex;
+            margin-top: 20px;
+        }
+
+        input {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+
+        button {
+            padding: 10px 20px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            margin-left: 10px;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>🤖 Chatbot Mathématiques</h1>
+    <p><em>Spécialisé dans la résolution de problèmes mathématiques selon la méthode du professeur</em></p>
+
+    <div class="chat-container" id="chat">
+        <div class="message bot">
+            <strong>Assistant:</strong> Bonjour ! Je suis votre assistant en mathématiques. Posez-moi une question et je
+            la résoudrai en suivant la méthode pédagogique appropriée.
+        </div>
+    </div>
+
+    <div class="input-container">
+        <input type="text" id="message" placeholder="Entrez votre question mathématique..."
+            onkeypress="handleKeyPress(event)">
+        <button onclick="sendMessage()">Envoyer</button>
+    </div>
+
+    <script>
+        function handleKeyPress(event) {
+            if (event.key === 'Enter') {
+                sendMessage();
+            }
+        }
+
+        async function sendMessage() {
+            const messageInput = document.getElementById('message');
+            const chat = document.getElementById('chat');
+            const message = messageInput.value.trim();
+
+            if (!message) return;
+
+            // Ajouter le message de l'utilisateur
+            const userMessageDiv = document.createElement('div');
+            userMessageDiv.className = 'message user';
+            userMessageDiv.innerHTML = `<strong>Vous:</strong> ${message}`;
+            chat.appendChild(userMessageDiv);
+
+            // Effacer l'input
+            messageInput.value = '';
+
+            // Afficher un indicateur de chargement
+            const loadingDiv = document.createElement('div');
+            loadingDiv.className = 'message bot';
+            loadingDiv.innerHTML = '<strong>Assistant:</strong> 🤔 Réflexion en cours...';
+            chat.appendChild(loadingDiv);
+            chat.scrollTop = chat.scrollHeight;
+
+            try {
+                const response = await fetch('/chat', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ message: message })
+                });
+
+                const data = await response.json();
+
+                // Supprimer l'indicateur de chargement
+                chat.removeChild(loadingDiv);
+
+                // Ajouter la réponse
+                const botMessageDiv = document.createElement('div');
+                botMessageDiv.className = 'message bot';
+                botMessageDiv.innerHTML = `<strong>Assistant:</strong> ${data.response || data.error}`;
+                chat.appendChild(botMessageDiv);
+
+            } catch (error) {
+                chat.removeChild(loadingDiv);
+                const errorDiv = document.createElement('div');
+                errorDiv.className = 'message bot';
+                errorDiv.innerHTML = `<strong>Assistant:</strong> ❌ Erreur: ${error.message}`;
+                chat.appendChild(errorDiv);
+            }
+
+            chat.scrollTop = chat.scrollHeight;
+        }
+    </script>
+</body>
+
+</html>
